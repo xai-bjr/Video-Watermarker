@@ -1,0 +1,1465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>VideoBulk — Batch Video Watermarker & Short-Form Formatter</title>
+<meta name="description" content="VideoBulk is a lightweight Windows desktop app that batch-resizes videos into 9:16, 1:1, and 16:9 formats and overlays PNG watermarks. Built with Python, Tkinter, and FFmpeg. Crafted by TechValorPK." />
+<meta name="author" content="TechValorPK" />
+<meta name="theme-color" content="#6c7bff" />
+
+<!-- OpenGraph -->
+<meta property="og:title" content="VideoBulk — Batch Video Watermarker" />
+<meta property="og:description" content="Resize + watermark hundreds of clips in one click. Built by TechValorPK." />
+<meta property="og:type" content="website" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+/* ============================================================
+   Reset & Base
+============================================================ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #07080d;
+  --bg-2:      #0d1017;
+  --card:      #11141f;
+  --card-hi:   #1a1f2e;
+  --border:    #1f2436;
+  --border-hi: #2a3145;
+
+  --accent:     #6c7bff;
+  --accent-hi:  #8b97ff;
+  --accent-lo:  #4d5cdb;
+  --purple:     #a855f7;
+  --pink:       #ec4899;
+  --green:      #22c55e;
+  --amber:      #f59e0b;
+  --red:        #ef4444;
+
+  --text:      #e8eaf2;
+  --text-dim:  #a0a8bd;
+  --text-mute: #6b7385;
+
+  --grad: linear-gradient(135deg, #6c7bff 0%, #a855f7 100%);
+  --grad-2: linear-gradient(135deg, #a855f7 0%, #ec4899 100%);
+
+  --radius: 18px;
+  --shadow: 0 20px 60px -20px rgba(108, 123, 255, 0.35);
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  line-height: 1.6;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ============================================================
+   3D Background canvas (Three.js)
+============================================================ */
+#bg3d {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.55;
+}
+
+/* Radial glow overlay */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 80% 50% at 50% 0%, rgba(108,123,255,0.18), transparent 70%),
+    radial-gradient(ellipse 60% 40% at 80% 100%, rgba(168,85,247,0.14), transparent 70%);
+}
+
+/* Subtle grid overlay */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(108,123,255,0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(108,123,255,0.035) 1px, transparent 1px);
+  background-size: 60px 60px;
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, black, transparent 80%);
+  -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, black, transparent 80%);
+}
+
+/* ============================================================
+   Layout wrapper — sits above canvas layers
+============================================================ */
+.wrap {
+  position: relative;
+  z-index: 3;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+section { padding: 100px 0; }
+
+/* ============================================================
+   Nav
+============================================================ */
+nav {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 100;
+  backdrop-filter: blur(18px) saturate(180%);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+  background: rgba(7, 8, 13, 0.72);
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.3s, background 0.3s;
+}
+nav.scrolled {
+  border-bottom-color: var(--border);
+  background: rgba(7, 8, 13, 0.88);
+}
+.nav-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 0;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-weight: 700;
+  font-size: 19px;
+  letter-spacing: -0.02em;
+  text-decoration: none;
+  color: var(--text);
+}
+.brand-mark {
+  width: 36px; height: 36px;
+  border-radius: 10px;
+  background: var(--grad);
+  display: grid;
+  place-items: center;
+  font-weight: 900;
+  font-size: 16px;
+  box-shadow: 0 8px 24px -6px rgba(108,123,255,0.6);
+  transform: perspective(600px) rotateY(-12deg);
+  transition: transform 0.4s cubic-bezier(.2,.8,.2,1);
+}
+.brand:hover .brand-mark { transform: perspective(600px) rotateY(0deg) rotateX(-6deg); }
+
+.brand-sub {
+  font-size: 10px;
+  color: var(--text-mute);
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-top: -2px;
+}
+
+.nav-links {
+  display: flex;
+  gap: 32px;
+  align-items: center;
+}
+.nav-links a {
+  color: var(--text-dim);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  transition: color 0.2s;
+}
+.nav-links a:hover { color: var(--text); }
+
+.nav-cta {
+  padding: 9px 18px;
+  border-radius: 9px;
+  background: var(--grad);
+  color: #fff !important;
+  font-weight: 600;
+  font-size: 13px;
+  box-shadow: 0 8px 20px -6px rgba(108,123,255,0.5);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.nav-cta:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 28px -8px rgba(108,123,255,0.7);
+}
+
+@media (max-width: 780px) {
+  .nav-links a:not(.nav-cta) { display: none; }
+}
+
+/* ============================================================
+   Hero
+============================================================ */
+.hero {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding-top: 120px;
+  padding-bottom: 80px;
+  text-align: center;
+  position: relative;
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  border-radius: 100px;
+  background: rgba(108,123,255,0.08);
+  border: 1px solid rgba(108,123,255,0.25);
+  color: var(--accent-hi);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-bottom: 28px;
+}
+.eyebrow .dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 12px var(--green);
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.4; }
+}
+
+h1.hero-title {
+  font-size: clamp(42px, 7vw, 84px);
+  font-weight: 900;
+  line-height: 1.02;
+  letter-spacing: -0.035em;
+  margin-bottom: 26px;
+}
+
+.grad-text {
+  background: var(--grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  background-size: 200% 200%;
+  animation: shift 8s ease-in-out infinite;
+}
+@keyframes shift {
+  0%, 100% { background-position: 0% 50%; }
+  50%      { background-position: 100% 50%; }
+}
+
+.hero-sub {
+  font-size: clamp(16px, 1.5vw, 19px);
+  color: var(--text-dim);
+  max-width: 680px;
+  margin: 0 auto 42px;
+  line-height: 1.7;
+}
+
+.hero-actions {
+  display: flex;
+  gap: 14px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-bottom: 70px;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 15px 30px;
+  border-radius: 12px;
+  font-weight: 600;
+  font-size: 15px;
+  text-decoration: none;
+  cursor: pointer;
+  border: none;
+  transition: all 0.25s cubic-bezier(.2,.8,.2,1);
+  position: relative;
+  transform-style: preserve-3d;
+}
+
+.btn-primary {
+  background: var(--grad);
+  color: #fff;
+  box-shadow: 0 10px 30px -8px rgba(108,123,255,0.6), inset 0 1px 0 rgba(255,255,255,0.15);
+}
+.btn-primary:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 20px 40px -10px rgba(108,123,255,0.8), inset 0 1px 0 rgba(255,255,255,0.2);
+}
+
+.btn-ghost {
+  background: rgba(255,255,255,0.04);
+  color: var(--text);
+  border: 1px solid var(--border-hi);
+}
+.btn-ghost:hover {
+  background: rgba(255,255,255,0.08);
+  transform: translateY(-3px);
+}
+
+/* ============================================================
+   3D App Preview — CSS transform showcase
+============================================================ */
+.preview-stage {
+  perspective: 1600px;
+  perspective-origin: 50% 40%;
+  margin-top: 20px;
+  display: flex;
+  justify-content: center;
+}
+
+.preview {
+  width: min(920px, 92vw);
+  aspect-ratio: 16 / 10;
+  border-radius: 16px;
+  background: linear-gradient(160deg, #1a1f2e 0%, #0d1017 100%);
+  border: 1px solid var(--border-hi);
+  box-shadow:
+    0 60px 120px -30px rgba(108,123,255,0.45),
+    0 30px 60px -20px rgba(0,0,0,0.6),
+    inset 0 1px 0 rgba(255,255,255,0.06);
+  transform: rotateX(12deg) rotateY(-6deg) rotateZ(0.5deg);
+  transition: transform 0.6s cubic-bezier(.2,.8,.2,1);
+  position: relative;
+  overflow: hidden;
+}
+.preview:hover {
+  transform: rotateX(4deg) rotateY(-2deg) scale(1.02);
+}
+
+.preview-bar {
+  height: 34px;
+  background: rgba(0,0,0,0.4);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  gap: 8px;
+}
+.preview-bar .dot {
+  width: 11px; height: 11px;
+  border-radius: 50%;
+}
+.dot-red    { background: #ff5f57; }
+.dot-yellow { background: #febc2e; }
+.dot-green  { background: #28c840; }
+
+.preview-bar .title {
+  margin-left: auto;
+  margin-right: auto;
+  font-size: 11px;
+  color: var(--text-mute);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.preview-body {
+  padding: 22px;
+  height: calc(100% - 34px);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.preview-card {
+  background: linear-gradient(160deg, rgba(30,36,54,0.85), rgba(17,20,31,0.85));
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  position: relative;
+  overflow: hidden;
+}
+
+.preview-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(108,123,255,0.08), transparent 60%);
+  pointer-events: none;
+}
+
+.preview-card h4 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--accent-hi);
+  margin-bottom: 10px;
+  font-weight: 700;
+}
+
+.preview-row {
+  height: 10px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.06);
+  margin-bottom: 8px;
+}
+.preview-row.short { width: 60%; }
+.preview-row.med   { width: 80%; }
+.preview-row.grad  { background: var(--grad); opacity: 0.7; }
+
+.preview-thumb {
+  aspect-ratio: 16/9;
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(108,123,255,0.4), rgba(168,85,247,0.4)),
+    repeating-linear-gradient(45deg, transparent 0 8px, rgba(255,255,255,0.03) 8px 9px);
+  position: relative;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+.preview-thumb::after {
+  content: "1080 × 1920";
+  position: absolute;
+  bottom: 8px; left: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  color: rgba(255,255,255,0.7);
+  background: rgba(0,0,0,0.5);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.progress-demo {
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.06);
+  overflow: hidden;
+  margin-top: 10px;
+}
+.progress-demo span {
+  display: block;
+  height: 100%;
+  width: 68%;
+  background: var(--grad);
+  border-radius: 4px;
+  animation: fill 3s ease-in-out infinite alternate;
+}
+@keyframes fill {
+  0%   { width: 22%; }
+  100% { width: 92%; }
+}
+
+@media (max-width: 640px) {
+  .preview-body { grid-template-columns: 1fr; }
+  .preview { aspect-ratio: auto; }
+}
+
+/* ============================================================
+   Section headings
+============================================================ */
+.section-head {
+  text-align: center;
+  margin-bottom: 64px;
+}
+.section-head .eyebrow { margin-bottom: 18px; }
+.section-head h2 {
+  font-size: clamp(30px, 4.4vw, 48px);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+  margin-bottom: 16px;
+}
+.section-head p {
+  color: var(--text-dim);
+  max-width: 620px;
+  margin: 0 auto;
+  font-size: 16px;
+}
+
+/* ============================================================
+   Feature cards — 3D tilt
+============================================================ */
+.features {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 22px;
+  perspective: 1400px;
+}
+
+.feature {
+  background: linear-gradient(160deg, var(--card-hi) 0%, var(--card) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 30px 26px;
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.5s cubic-bezier(.2,.8,.2,1),
+              border-color 0.4s,
+              box-shadow 0.4s;
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+
+.feature::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(600px circle at var(--mx, 50%) var(--my, 50%),
+              rgba(108,123,255,0.14), transparent 40%);
+  opacity: 0;
+  transition: opacity 0.4s;
+  pointer-events: none;
+}
+.feature:hover {
+  transform: translateY(-8px) rotateX(2deg);
+  border-color: var(--border-hi);
+  box-shadow: 0 30px 60px -20px rgba(108,123,255,0.35);
+}
+.feature:hover::before { opacity: 1; }
+
+.feature-icon {
+  width: 52px; height: 52px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  font-size: 24px;
+  margin-bottom: 20px;
+  background: rgba(108,123,255,0.12);
+  border: 1px solid rgba(108,123,255,0.25);
+  color: var(--accent-hi);
+}
+.feature-icon.purple { background: rgba(168,85,247,0.12); border-color: rgba(168,85,247,0.25); color: #c084fc; }
+.feature-icon.pink   { background: rgba(236,72,153,0.12); border-color: rgba(236,72,153,0.25); color: #f472b6; }
+.feature-icon.green  { background: rgba(34,197,94,0.12);  border-color: rgba(34,197,94,0.25);  color: #4ade80; }
+.feature-icon.amber  { background: rgba(245,158,11,0.12); border-color: rgba(245,158,11,0.25); color: #fbbf24; }
+
+.feature h3 {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin-bottom: 10px;
+}
+.feature p {
+  color: var(--text-dim);
+  font-size: 14.5px;
+  line-height: 1.65;
+}
+
+/* ============================================================
+   How it works — timeline
+============================================================ */
+.steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 20px;
+  position: relative;
+}
+
+.step {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 28px 22px;
+  position: relative;
+  transition: transform 0.35s, border-color 0.35s;
+}
+.step:hover {
+  transform: translateY(-6px);
+  border-color: var(--accent);
+}
+
+.step-num {
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 17px;
+  color: var(--accent-hi);
+  background: rgba(108,123,255,0.1);
+  border: 1.5px solid var(--accent);
+  margin-bottom: 18px;
+  transform: rotate(-6deg);
+  transition: transform 0.4s;
+}
+.step:hover .step-num { transform: rotate(0deg) scale(1.08); }
+
+.step h4 {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  letter-spacing: -0.01em;
+}
+.step p {
+  color: var(--text-dim);
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+/* ============================================================
+   Specs grid
+============================================================ */
+.specs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.spec {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px;
+  transition: border-color 0.3s, transform 0.3s;
+}
+.spec:hover { border-color: var(--border-hi); transform: translateY(-3px); }
+
+.spec-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-mute);
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.spec-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  color: var(--text);
+  font-weight: 500;
+}
+.spec-value.mono-accent { color: var(--accent-hi); }
+
+/* ============================================================
+   Format showcase — big 3D video cards
+============================================================ */
+.formats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 24px;
+  perspective: 1400px;
+}
+
+.format {
+  border-radius: var(--radius);
+  padding: 30px 26px;
+  background: linear-gradient(160deg, var(--card-hi), var(--card));
+  border: 1px solid var(--border);
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.6s cubic-bezier(.2,.8,.2,1),
+              box-shadow 0.6s, border-color 0.4s;
+  transform-style: preserve-3d;
+}
+.format:hover {
+  transform: translateY(-10px) rotateY(-4deg) rotateX(2deg);
+  border-color: var(--accent);
+  box-shadow: 0 40px 80px -30px rgba(108,123,255,0.5);
+}
+
+.format-tag {
+  display: inline-block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-hi);
+  background: rgba(108,123,255,0.1);
+  border: 1px solid rgba(108,123,255,0.3);
+  padding: 4px 10px;
+  border-radius: 6px;
+  margin-bottom: 16px;
+}
+
+.format-visual {
+  width: 100%;
+  display: grid;
+  place-items: center;
+  margin-bottom: 20px;
+}
+.format-visual .box {
+  border: 2px dashed rgba(108,123,255,0.4);
+  border-radius: 8px;
+  background: rgba(108,123,255,0.06);
+  transition: all 0.5s;
+}
+.format:hover .format-visual .box {
+  border-color: var(--accent);
+  background: rgba(108,123,255,0.14);
+  box-shadow: 0 0 30px rgba(108,123,255,0.3);
+}
+
+.format h3 {
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin-bottom: 6px;
+}
+.format .platforms {
+  color: var(--text-mute);
+  font-size: 13px;
+  margin-bottom: 14px;
+}
+.format .dims {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--text-dim);
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+
+/* ============================================================
+   About TechValorPK
+============================================================ */
+.about {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 60px;
+  align-items: center;
+}
+
+.about-visual {
+  position: relative;
+  aspect-ratio: 1;
+  max-width: 420px;
+  justify-self: center;
+  perspective: 1000px;
+}
+.about-visual .core {
+  position: absolute;
+  inset: 20%;
+  border-radius: 32px;
+  background: var(--grad);
+  display: grid;
+  place-items: center;
+  font-size: 64px;
+  font-weight: 900;
+  color: #fff;
+  box-shadow: 0 40px 100px -20px rgba(108,123,255,0.7),
+              inset 0 2px 0 rgba(255,255,255,0.25);
+  transform: rotateX(8deg) rotateY(-8deg);
+  transition: transform 0.8s cubic-bezier(.2,.8,.2,1);
+}
+.about-visual:hover .core { transform: rotateX(0) rotateY(0) scale(1.03); }
+
+.about-visual .ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 1px dashed rgba(108,123,255,0.25);
+  animation: spin 40s linear infinite;
+}
+.about-visual .ring.r1 { inset: 4%; }
+.about-visual .ring.r2 { inset: -8%; animation-duration: 60s; animation-direction: reverse; border-color: rgba(168,85,247,0.2); }
+.about-visual .ring.r3 { inset: -20%; animation-duration: 90s; border-color: rgba(236,72,153,0.15); }
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.about h2 {
+  font-size: clamp(28px, 3.5vw, 42px);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+  margin-bottom: 20px;
+}
+.about p {
+  color: var(--text-dim);
+  font-size: 16px;
+  margin-bottom: 18px;
+  line-height: 1.75;
+}
+
+.badge-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 26px;
+}
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 100px;
+  background: rgba(108,123,255,0.08);
+  border: 1px solid rgba(108,123,255,0.25);
+  color: var(--accent-hi);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+@media (max-width: 860px) {
+  .about { grid-template-columns: 1fr; }
+  .about-visual { max-width: 320px; }
+}
+
+/* ============================================================
+   CTA section
+============================================================ */
+.cta-box {
+  background: linear-gradient(160deg, rgba(108,123,255,0.08), rgba(168,85,247,0.06));
+  border: 1px solid rgba(108,123,255,0.25);
+  border-radius: 24px;
+  padding: 70px 40px;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+  backdrop-filter: blur(10px);
+}
+.cta-box::before {
+  content: "";
+  position: absolute;
+  top: -50%; left: -50%;
+  width: 200%; height: 200%;
+  background: conic-gradient(from 0deg, transparent, rgba(108,123,255,0.12), transparent 30%);
+  animation: rotate 20s linear infinite;
+  pointer-events: none;
+}
+@keyframes rotate {
+  to { transform: rotate(360deg); }
+}
+.cta-box > * { position: relative; z-index: 1; }
+
+.cta-box h2 {
+  font-size: clamp(28px, 4vw, 44px);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  margin-bottom: 16px;
+}
+.cta-box p {
+  color: var(--text-dim);
+  max-width: 520px;
+  margin: 0 auto 32px;
+  font-size: 16px;
+}
+
+/* ============================================================
+   Tech stack strip
+============================================================ */
+.stack {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 14px;
+}
+.stack-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 20px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-dim);
+  transition: all 0.3s;
+}
+.stack-item:hover {
+  border-color: var(--accent);
+  color: var(--text);
+  transform: translateY(-3px) scale(1.02);
+  box-shadow: 0 15px 30px -10px rgba(108,123,255,0.3);
+}
+.stack-item .ico { font-size: 18px; }
+
+/* ============================================================
+   Footer
+============================================================ */
+footer {
+  border-top: 1px solid var(--border);
+  padding: 40px 0;
+  margin-top: 60px;
+  color: var(--text-mute);
+  font-size: 13.5px;
+}
+.footer-inner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.footer-inner a {
+  color: var(--text-dim);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+.footer-inner a:hover { color: var(--accent-hi); }
+
+.footer-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  color: var(--text);
+}
+.footer-brand .mark {
+  width: 26px; height: 26px;
+  border-radius: 7px;
+  background: var(--grad);
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 900;
+  color: #fff;
+}
+
+/* ============================================================
+   Reveal on scroll
+============================================================ */
+.reveal {
+  opacity: 0;
+  transform: translateY(30px);
+  transition: opacity 0.8s cubic-bezier(.2,.8,.2,1),
+              transform 0.8s cubic-bezier(.2,.8,.2,1);
+}
+.reveal.in {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ============================================================
+   Scrollbar
+============================================================ */
+::-webkit-scrollbar { width: 10px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb {
+  background: var(--border-hi);
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+</style>
+</head>
+<body>
+
+<!-- 3D background -->
+<canvas id="bg3d"></canvas>
+
+<!-- ============================================================
+     NAVIGATION
+============================================================ -->
+<nav id="nav">
+  <div class="wrap nav-inner">
+    <a href="#" class="brand">
+      <div class="brand-mark">VB</div>
+      <div>
+        <div>VideoBulk</div>
+        <div class="brand-sub">by TechValorPK</div>
+      </div>
+    </a>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#how">How it works</a>
+      <a href="#formats">Formats</a>
+      <a href="#about">About</a>
+      <a href="#download" class="nav-cta">Download</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ============================================================
+     HERO
+============================================================ -->
+<header class="hero">
+  <div class="wrap">
+    <div class="eyebrow">
+      <span class="dot"></span>
+      Built by TechValorPK
+    </div>
+
+    <h1 class="hero-title">
+      Watermark &amp; resize<br>
+      <span class="grad-text">every clip. At once.</span>
+    </h1>
+
+    <p class="hero-sub">
+      VideoBulk is a lightweight Windows desktop app that batch-converts raw
+      footage into short-form formats and overlays your logo on every video —
+      all offline, all in one click. No cloud. No subscriptions. No editing suite.
+    </p>
+
+    <div class="hero-actions">
+      <a href="#download" class="btn btn-primary">
+        ⬇ Download for Windows
+      </a>
+      <a href="#how" class="btn btn-ghost">
+        See how it works →
+      </a>
+    </div>
+
+    <!-- 3D app preview -->
+    <div class="preview-stage reveal">
+      <div class="preview">
+        <div class="preview-bar">
+          <span class="dot dot-red"></span>
+          <span class="dot dot-yellow"></span>
+          <span class="dot dot-green"></span>
+          <span class="title">VideoBulk — Bulk Video Watermarker</span>
+        </div>
+        <div class="preview-body">
+          <div class="preview-card">
+            <h4>① Pick your videos</h4>
+            <div class="preview-row short"></div>
+            <div class="preview-row med"></div>
+            <div class="preview-row grad"></div>
+            <div class="preview-row short"></div>
+            <h4 style="margin-top:20px;">② Add your logo</h4>
+            <div class="preview-row med"></div>
+            <div class="preview-row short"></div>
+          </div>
+          <div class="preview-card">
+            <h4>③ Format</h4>
+            <div class="preview-thumb"></div>
+            <h4>Processing</h4>
+            <div class="progress-demo"><span></span></div>
+            <p style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-mute);margin-top:8px;">
+              6 of 9 clips · 68 %
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- ============================================================
+     FEATURES
+============================================================ -->
+<section id="features">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="eyebrow">Features</div>
+      <h2>Everything creators need.<br>Nothing they don't.</h2>
+      <p>Built for the daily grind of short-form posting. Drop in a folder, walk away, come back to platform-ready clips.</p>
+    </div>
+
+    <div class="features">
+      <div class="feature reveal">
+        <div class="feature-icon">📥</div>
+        <h3>Bulk import</h3>
+        <p>Pick an entire folder — subfolders included — or hand-pick individual clips. VideoBulk queues them all and processes them back-to-back.</p>
+      </div>
+
+      <div class="feature reveal">
+        <div class="feature-icon purple">📐</div>
+        <h3>One-click reframe</h3>
+        <p>Convert any source to 9:16 vertical, 1:1 square, 4:5 portrait, or 16:9 widescreen. Six presets, one dropdown.</p>
+      </div>
+
+      <div class="feature reveal">
+        <div class="feature-icon pink">🖼️</div>
+        <h3>PNG watermark</h3>
+        <p>Overlay your logo on every clip. Adjust size, position, and opacity — perfect for a corner brand mark.</p>
+      </div>
+
+      <div class="feature reveal">
+        <div class="feature-icon green">⚡</div>
+        <h3>Never freezes</h3>
+        <p>All rendering runs on a background thread. The UI stays fully responsive — no "(Not Responding)" dialogs, ever.</p>
+      </div>
+
+      <div class="feature reveal">
+        <div class="feature-icon amber">🎯</div>
+        <h3>Three fill modes</h3>
+        <p>Pad with bars, crop to fill, or blur the background — pick how mismatched aspect ratios should be handled.</p>
+      </div>
+
+      <div class="feature reveal">
+        <div class="feature-icon">📦</div>
+        <h3>Fully portable</h3>
+        <p>Ships as a standalone Windows app with FFmpeg bundled. No Python install, no dependencies — just unzip and run.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     HOW IT WORKS
+============================================================ -->
+<section id="how" style="background: linear-gradient(180deg, transparent, rgba(108,123,255,0.03), transparent);">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="eyebrow">How it works</div>
+      <h2>Four steps. Zero learning curve.</h2>
+      <p>The whole workflow is laid out in numbered cards — no settings hunt, no hidden menus.</p>
+    </div>
+
+    <div class="steps">
+      <div class="step reveal">
+        <div class="step-num">1</div>
+        <h4>Pick your videos</h4>
+        <p>Choose a folder or select individual files. Every supported video gets added to the queue automatically.</p>
+      </div>
+      <div class="step reveal">
+        <div class="step-num">2</div>
+        <h4>Add your logo</h4>
+        <p>Pick a PNG watermark. VideoBulk places it in a corner of every clip. Skip this if you only need resizing.</p>
+      </div>
+      <div class="step reveal">
+        <div class="step-num">3</div>
+        <h4>Choose a format</h4>
+        <p>Vertical for TikTok &amp; Reels. Square for Instagram feed. Widescreen for YouTube. One click to pick.</p>
+      </div>
+      <div class="step reveal">
+        <div class="step-num">4</div>
+        <h4>Hit Start</h4>
+        <p>Watch the progress bar fill as FFmpeg churns through every clip. Outputs land safely beside the originals.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     FORMATS
+============================================================ -->
+<section id="formats">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="eyebrow">Output formats</div>
+      <h2>Built for every platform.</h2>
+      <p>Each preset is tested against platform specifications — no cropping surprises, no stretched faces.</p>
+    </div>
+
+    <div class="formats">
+      <div class="format reveal">
+        <div class="format-tag">9:16</div>
+        <div class="format-visual">
+          <div class="box" style="width:90px;height:160px;"></div>
+        </div>
+        <h3>Vertical</h3>
+        <div class="platforms">TikTok · Reels · Shorts</div>
+        <div class="dims">1080 × 1920</div>
+      </div>
+
+      <div class="format reveal">
+        <div class="format-tag">1:1</div>
+        <div class="format-visual">
+          <div class="box" style="width:130px;height:130px;"></div>
+        </div>
+        <h3>Square</h3>
+        <div class="platforms">Instagram feed · Facebook</div>
+        <div class="dims">1080 × 1080</div>
+      </div>
+
+      <div class="format reveal">
+        <div class="format-tag">16:9</div>
+        <div class="format-visual">
+          <div class="box" style="width:180px;height:102px;"></div>
+        </div>
+        <h3>Widescreen</h3>
+        <div class="platforms">YouTube · Websites</div>
+        <div class="dims">1920 × 1080</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     TECH STACK
+============================================================ -->
+<section>
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="eyebrow">Tech stack</div>
+      <h2>Built on solid ground.</h2>
+    </div>
+
+    <div class="stack reveal">
+      <div class="stack-item"><span class="ico">🐍</span> Python 3.10+</div>
+      <div class="stack-item"><span class="ico">🪟</span> Tkinter / ttk</div>
+      <div class="stack-item"><span class="ico">🎬</span> FFmpeg</div>
+      <div class="stack-item"><span class="ico">🧵</span> Threading + Queue</div>
+      <div class="stack-item"><span class="ico">🖼️</span> Pillow</div>
+      <div class="stack-item"><span class="ico">📦</span> PyInstaller</div>
+    </div>
+
+    <div class="specs" style="margin-top: 48px;">
+      <div class="spec reveal">
+        <div class="spec-label">UI framework</div>
+        <div class="spec-value">Custom canvas widgets</div>
+      </div>
+      <div class="spec reveal">
+        <div class="spec-label">Video engine</div>
+        <div class="spec-value mono-accent">libx264 · aac</div>
+      </div>
+      <div class="spec reveal">
+        <div class="spec-label">Scaling</div>
+        <div class="spec-value">Lanczos resampling</div>
+      </div>
+      <div class="spec reveal">
+        <div class="spec-label">Startup time</div>
+        <div class="spec-value">Instant (foldered build)</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     ABOUT TECHVALORPK
+============================================================ -->
+<section id="about">
+  <div class="wrap">
+    <div class="about reveal">
+      <div>
+        <div class="eyebrow">About the maker</div>
+        <h2>Crafted by <span class="grad-text">TechValorPK</span>.</h2>
+        <p>
+          TechValorPK is an independent studio focused on building lightweight,
+          practical desktop tools that solve real problems for creators,
+          freelancers, and small businesses.
+        </p>
+        <p>
+          VideoBulk is one of a growing line of tools in production — each
+          designed with the same philosophy: no bloat, no subscriptions,
+          no cloud dependency. Just an app that does one job extremely well.
+        </p>
+
+        <div class="badge-row">
+          <span class="pill">🎯 Focused tools</span>
+          <span class="pill">⚡ Zero cloud</span>
+          <span class="pill">🔧 Open source</span>
+          <span class="pill">💼 Freelance-ready</span>
+        </div>
+      </div>
+
+      <div class="about-visual">
+        <div class="ring r1"></div>
+        <div class="ring r2"></div>
+        <div class="ring r3"></div>
+        <div class="core">TV</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     CTA / DOWNLOAD
+============================================================ -->
+<section id="download">
+  <div class="wrap">
+    <div class="cta-box reveal">
+      <h2>Ready to bulk-process?</h2>
+      <p>Grab the standalone Windows build — no Python needed. Unzip, double-click, done.</p>
+
+      <div class="hero-actions" style="margin-bottom: 0;">
+        <a href="#" class="btn btn-primary" onclick="alert('Coming soon — check the GitHub Releases page.'); return false;">
+          ⬇ Download VideoBulk
+        </a>
+        <a href="#" class="btn btn-ghost" onclick="alert('Star us on GitHub once the repo is public!'); return false;">
+          ★ Star on GitHub
+        </a>
+      </div>
+
+      <p style="font-size: 12.5px; color: var(--text-mute); margin-top: 22px; margin-bottom: 0;">
+        Windows 10/11 · ~465 MB · Portable · No installer
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     FOOTER
+============================================================ -->
+<footer>
+  <div class="wrap footer-inner">
+    <div class="footer-brand">
+      <div class="mark">VB</div>
+      <span>VideoBulk — a <strong style="color:var(--accent-hi);">TechValorPK</strong> project</span>
+    </div>
+    <div style="display:flex; gap:22px;">
+      <a href="#features">Features</a>
+      <a href="#how">How it works</a>
+      <a href="#about">About</a>
+    </div>
+    <div>© <span id="year"></span> TechValorPK</div>
+  </div>
+</footer>
+
+<!-- ============================================================
+     SCRIPTS
+============================================================ -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+/* ============================================================
+   Three.js — 3D floating particles + wireframe icosahedrons
+============================================================ */
+(function () {
+  const canvas = document.getElementById('bg3d');
+  if (!canvas || typeof THREE === 'undefined') return;
+
+  const scene  = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(
+    60, window.innerWidth / window.innerHeight, 0.1, 1000
+  );
+  camera.position.z = 40;
+
+  const renderer = new THREE.WebGLRenderer({
+    canvas, antialias: true, alpha: true
+  });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+
+  // --- Particles --------------------------------------------------------
+  const pCount = 800;
+  const positions = new Float32Array(pCount * 3);
+  const colors    = new Float32Array(pCount * 3);
+  const cA = new THREE.Color(0x6c7bff);
+  const cB = new THREE.Color(0xa855f7);
+  const cC = new THREE.Color(0xec4899);
+
+  for (let i = 0; i < pCount; i++) {
+    positions[i * 3    ] = (Math.random() - 0.5) * 120;
+    positions[i * 3 + 1] = (Math.random() - 0.5) * 80;
+    positions[i * 3 + 2] = (Math.random() - 0.5) * 60;
+
+    const t = Math.random();
+    const c = t < 0.5 ? cA.clone().lerp(cB, t * 2)
+                      : cB.clone().lerp(cC, (t - 0.5) * 2);
+    colors[i * 3    ] = c.r;
+    colors[i * 3 + 1] = c.g;
+    colors[i * 3 + 2] = c.b;
+  }
+
+  const pGeo = new THREE.BufferGeometry();
+  pGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  pGeo.setAttribute('color',    new THREE.BufferAttribute(colors, 3));
+
+  const pMat = new THREE.PointsMaterial({
+    size: 0.35,
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.9,
+    sizeAttenuation: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  const points = new THREE.Points(pGeo, pMat);
+  scene.add(points);
+
+  // --- Wireframe solids -------------------------------------------------
+  const solids = [];
+  const geos = [
+    new THREE.IcosahedronGeometry(3.5, 1),
+    new THREE.OctahedronGeometry(3, 0),
+    new THREE.TetrahedronGeometry(3.2, 0),
+    new THREE.IcosahedronGeometry(2.6, 1),
+  ];
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0x6c7bff,
+    wireframe: true,
+    transparent: true,
+    opacity: 0.16,
+  });
+
+  const layout = [
+    [-22,  6, -12],
+    [ 24, -8, -18],
+    [ 16, 12, -22],
+    [-18,-10, -16],
+  ];
+
+  for (let i = 0; i < geos.length; i++) {
+    const m = new THREE.Mesh(geos[i], mat.clone());
+    m.material.color = new THREE.Color([0x6c7bff, 0xa855f7, 0xec4899, 0x22c55e][i]);
+    m.position.set(...layout[i]);
+    scene.add(m);
+    solids.push(m);
+  }
+
+  // --- Mouse parallax ---------------------------------------------------
+  let mouseX = 0, mouseY = 0;
+  document.addEventListener('mousemove', (e) => {
+    mouseX = (e.clientX / window.innerWidth  - 0.5) * 2;
+    mouseY = (e.clientY / window.innerHeight - 0.5) * 2;
+  });
+
+  // --- Scroll parallax --------------------------------------------------
+  let scrollY = 0;
+  window.addEventListener('scroll', () => { scrollY = window.scrollY; });
+
+  // --- Resize -----------------------------------------------------------
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  // --- Animate ----------------------------------------------------------
+  const clock = new THREE.Clock();
+  function animate() {
+    requestAnimationFrame(animate);
+    const t = clock.getElapsedTime();
+
+    points.rotation.y = t * 0.03;
+    points.rotation.x = Math.sin(t * 0.1) * 0.05;
+
+    solids.forEach((s, i) => {
+      s.rotation.x = t * (0.08 + i * 0.03);
+      s.rotation.y = t * (0.12 + i * 0.04);
+      s.position.y += Math.sin(t + i) * 0.005;
+    });
+
+    camera.position.x += (mouseX * 3 - camera.position.x) * 0.03;
+    camera.position.y += (-mouseY * 2 - camera.position.y) * 0.03 + 0.001;
+    camera.position.y -= scrollY * 0.0015;
+
+    camera.lookAt(0, 0, 0);
+    renderer.render(scene, camera);
+  }
+  animate();
+})();
+
+/* ============================================================
+   Nav scrolled state
+============================================================ */
+const nav = document.getElementById('nav');
+window.addEventListener('scroll', () => {
+  nav.classList.toggle('scrolled', window.scrollY > 20);
+});
+
+/* ============================================================
+   Reveal on scroll
+============================================================ */
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach((e) => {
+    if (e.isIntersecting) {
+      e.target.classList.add('in');
+      observer.unobserve(e.target);
+    }
+  });
+}, { threshold: 0.12, rootMargin: '0px 0px -60px 0px' });
+
+document.querySelectorAll('.reveal').forEach((el, i) => {
+  el.style.transitionDelay = (i % 6) * 60 + 'ms';
+  observer.observe(el);
+});
+
+/* ============================================================
+   Feature card spotlight (cursor-follow glow)
+============================================================ */
+document.querySelectorAll('.feature').forEach((card) => {
+  card.addEventListener('mousemove', (e) => {
+    const rect = card.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width)  * 100;
+    const y = ((e.clientY - rect.top)  / rect.height) * 100;
+    card.style.setProperty('--mx', x + '%');
+    card.style.setProperty('--my', y + '%');
+  });
+});
+
+/* ============================================================
+   Year
+============================================================ */
+document.getElementById('year').textContent = new Date().getFullYear();
+</script>
+
+</body>
+</html>
